@@ -1,0 +1,58 @@
+$vOBJ->{VGROUP} = {
+                    'dim1' => {
+                                'parents' => {
+                                               'montest.HDF' => 10,
+                                               'myData' => 9
+                                             },
+                                'class' => 'Dim0.0',
+                                'attach' => {
+                                              'dim1' => {
+                                                          'class' => 'DimVal0.1',
+                                                          'type' => 'VData',
+                                                          'ref' => 4
+                                                        }
+                                            },
+                                'ref' => 5
+                              },
+                    'montest.HDF' => {
+                                       'childs' => {
+                                                     'dim1' => 5,
+                                                     'myData' => 9,
+                                                     'dim2' => 7
+                                                   },
+                                       'class' => 'CDF0.0',
+                                       'ref' => 10
+                                     },
+                    'myData' => {
+                                  'parents' => {
+                                                 'montest.HDF' => 10
+                                               },
+                                  'childs' => {
+                                                'dim1' => 5,
+                                                'dim2' => 7
+                                              },
+                                  'class' => 'Var0.0',
+                                  'attach' => {
+                                                'myData' => {
+                                                              'type' => 'SDS_Data',
+                                                              'ref' => 2
+                                                            }
+                                              },
+                                  'ref' => 9
+                                },
+                    'dim2' => {
+                                'parents' => {
+                                               'montest.HDF' => 10,
+                                               'myData' => 9
+                                             },
+                                'class' => 'Dim0.0',
+                                'attach' => {
+                                              'dim2' => {
+                                                          'class' => 'DimVal0.1',
+                                                          'type' => 'VData',
+                                                          'ref' => 6
+                                                        }
+                                            },
+                                'ref' => 7
+                              }
+                  };

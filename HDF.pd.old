@@ -1,0 +1,186 @@
+pp_addpm({At => Top}, <<'EOD');
+
+=head1 NAME 
+
+PDL::IO::HDF - An interface librairie for HDF file.
+
+This librairy provide functions to manipulate
+HDF files with SD, VS and V interface (reading, writting, ...)
+
+For more infomation on HDF, see http://hdf.ncsa.uiuc.edu/
+
+=head1 SYNOPSIS
+
+  use PDL;
+  use PDL::IO::HDF;
+	
+=head1 DESCRIPTION
+
+This is the description of the PDL::IO::HDF module.
+
+=cut
+EOD
+
+
+pp_addhdr(<<'EOH');
+
+#include <hdf.h>
+#include <string.h>
+
+
+#define PDLchar pdl
+#define PDLuchar pdl
+#define PDLshort pdl
+#define PDLint pdl
+#define PDLlong pdl
+#define PDLfloat pdl
+#define PDLdouble pdl
+#define uchar unsigned char
+
+
+#define COMP_CODE_NONE 0
+#define COMP_CODE_RLE 1
+#define COMP_CODE_SKPHUFF 3
+#define COMP_CODE_DEFLATE 4
+
+EOH
+
+#pp_bless ("PDL::IO::HDF");
+
+
+$VERSION = '0.2.beta';
+
+ 
+pp_addpm(<<'EOPM');
+
+use PDL::Primitive;
+use PDL::Basic;
+
+## Constant
+$DFACC_READ=1;
+$DFACC_WRITE=2;
+$DFACC_CREATE=4;
+$DFACC_ALL=7;
+$DFACC_RDONLY=1;
+$DFACC_RDWR=3;
+$FULL_INTERLACE=0;
+$NO_INTERLACE=1;
+$DFNT_FLOAT32=5;
+$DFNT_UCHAR=3;
+$DFNT_CHAR=4;
+$DFNT_FLOAT64=6;
+$DFNT_INT8=20;
+$DFNT_UINT8=21;
+$DFNT_INT16=22;
+$DFNT_UINT16=23;
+$DFNT_INT32=24;
+$DFNT_INT64=25;
+
+#declaration des différents 'typemap'
+#typemap pour sdreadattr
+my %SDreadattrTMAP = ( 3  => \&PDL::IO::HDF::_SDreadattr_uchar, #uchar 8b
+                       4  => \&PDL::IO::HDF::_SDreadattr_char, #char 8b
+                       5  => \&PDL::IO::HDF::_SDreadattr_float, #float 32b
+                       6  => \&PDL::IO::HDF::_SDreadattr_double, #double 64b
+                       20 => \&PDL::IO::HDF::_SDreadattr_char, #char 8b
+                       21 => \&PDL::IO::HDF::_SDreadattr_char, #char 8b
+                       22 => \&PDL::IO::HDF::_SDreadattr_short, # 16b
+                       23 => \&PDL::IO::HDF::_SDreadattr_ushort, # 16b
+                       24 => \&PDL::IO::HDF::_SDreadattr_long, # 32b
+                       25 => \&PDL::IO::HDF::_SDreadattr_ulong ); #32b
+
+#typemap pour sdreaddata
+my %SDreaddataTMAP = ( 3  => \&PDL::IO::HDF::_SDreaddata_uchar, #uchar 8b
+                       4  => \&PDL::IO::HDF::_SDreaddata_char, #char 8b
+                       5  => \&PDL::IO::HDF::_SDreaddata_float, #float 32b
+                       6  => \&PDL::IO::HDF::_SDreaddata_double, #double 64b
+                       20 => \&PDL::IO::HDF::_SDreaddata_char, #char 8b
+                       21 => \&PDL::IO::HDF::_SDreaddata_uchar, #char 8b
+                       22 => \&PDL::IO::HDF::_SDreaddata_short, # 16b
+                       23 => \&PDL::IO::HDF::_SDreaddata_ushort, # 16b
+                       24 => \&PDL::IO::HDF::_SDreaddata_long, # 32b
+                       25 => \&PDL::IO::HDF::_SDreaddata_ulong ); #32b
+
+#typemap pour convertir typePDL->typeHDF
+%SDtypeTMAP = (
+		  PDL::byte->[0]   => $DFNT_UINT8, 
+		  PDL::short->[0]  => $DFNT_INT16, 
+		  PDL::ushort->[0]  => $DFNT_UINT16, 
+		  PDL::long->[0]   => $DFNT_INT32, 
+		  PDL::float->[0]  => $DFNT_FLOAT32, 
+		  PDL::double->[0] => $DFNT_FLOAT64, 
+		  PDL::byte->[0]   => $DFNT_UCHAR
+		 );
+
+#typemap pour convertir typeHDF->typePDL
+%SDinvtypeTMAP = (
+		   $DFNT_INT8 => sub { PDL::byte(@_); }, 
+		   $DFNT_UINT8 => sub { PDL::byte(@_); }, #a tester
+		   $DFNT_INT16 => sub { PDL::short(@_); },
+		   $DFNT_UINT16 =>  sub { PDL::ushort(@_); },
+		   $DFNT_INT32 => sub { PDL::long(@_); }, 
+		   $DFNT_INT64 => sub { PDL::long(@_); },
+		   $DFNT_FLOAT32  => sub { PDL::float(@_); }, 
+		   $DFNT_FLOAT64  => sub { PDL::double(@_); },
+		   $DFNT_UCHAR  => sub { PDL::byte(@_); },
+		   $DFNT_CHAR  => sub { PDL::byte(@_); }
+		  );
+
+#typemap sdwritedata
+my %SDwritedataTMAP = ( 3  => \&PDL::IO::HDF::_SDwritedata_uchar, #uchar 8b
+			4  => \&PDL::IO::HDF::_SDwritedata_char, #char 8b
+			5  => \&PDL::IO::HDF::_SDwritedata_float, #float 32b
+			6  => \&PDL::IO::HDF::_SDwritedata_double, #double 64b
+			20 => \&PDL::IO::HDF::_SDwritedata_char, #char 8b
+			21 => \&PDL::IO::HDF::_SDwritedata_uchar, #char 8b
+			22 => \&PDL::IO::HDF::_SDwritedata_short, # 16b
+			23 => \&PDL::IO::HDF::_SDwritedata_ushort, # 16b
+			24 => \&PDL::IO::HDF::_SDwritedata_long, # 32b
+			25 => \&PDL::IO::HDF::_SDwritedata_ulong ); #32b
+
+#typemap sdsetfillvalue
+my %SDsetfillvalueTMAP = ( 3  => \&PDL::IO::HDF::_SDsetfillvalue_uchar, #uchar 8b
+			   4  => \&PDL::IO::HDF::_SDsetfillvalue_char, #char 8b
+			   5  => \&PDL::IO::HDF::_SDsetfillvalue_float, #float 32b
+			   6  => \&PDL::IO::HDF::_SDsetfillvalue_double, #double 64b
+			   20 => \&PDL::IO::HDF::_SDsetfillvalue_char, #char 8b
+			   21 => \&PDL::IO::HDF::_SDsetfillvalue_uchar, #char 8b
+			   22 => \&PDL::IO::HDF::_SDsetfillvalue_short, # 16b
+			   23 => \&PDL::IO::HDF::_SDsetfillvalue_ushort, # 16b
+			   24 => \&PDL::IO::HDF::_SDsetfillvalue_long, # 32b
+			   25 => \&PDL::IO::HDF::_SDsetfillvalue_ulong ); #32b
+
+#typemap sdsetrange
+my %SDsetrangeTMAP = ( 3  => \&PDL::IO::HDF::_SDsetrange_uchar, #uchar 8b
+		       4  => \&PDL::IO::HDF::_SDsetrange_char, #char 8b
+		       5  => \&PDL::IO::HDF::_SDsetrange_float, #float 32b
+		       6  => \&PDL::IO::HDF::_SDsetrange_double, #double 64b
+		       20 => \&PDL::IO::HDF::_SDsetrange_char, #char 8b
+	               21 => \&PDL::IO::HDF::_SDsetrange_char, #char 8b
+		       22 => \&PDL::IO::HDF::_SDsetrange_short, # 16b
+		       23 => \&PDL::IO::HDF::_SDsetrange_ushort, # 16b
+		       24 => \&PDL::IO::HDF::_SDsetrange_long, # 32b
+		       25 => \&PDL::IO::HDF::_SDsetrange_ulong ); #32b
+
+EOPM
+
+pp_addpm(<<'EOD');
+
+
+=head1 AUTHOR
+
+Patrick Leilde patrick.leilde@ifremer.fr
+contribs of Olivier Archer olivier.archer@ifremer.fr
+
+=head1 SEE ALSO
+
+perl(1), PDL(1), PDL::IO::HDF::SD(1), PDL::IO::HDF::VS(1).
+
+=cut
+EOD
+
+
+
+pp_done();
+
+

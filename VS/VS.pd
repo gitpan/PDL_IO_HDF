@@ -1,0 +1,759 @@
+pp_addpm({At => Top}, <<'EOD');
+
+=head1 NAME 
+
+PDL::IO::HDF - An interface librairie for HDF file.
+
+This librairy provide functions to manipulate
+HDF files with VS and V interface (reading, writting, ...)
+
+For more infomation on HDF, see http://hdf.ncsa.uiuc.edu/
+
+=head1 SYNOPSIS
+
+  use PDL;
+  use PDL::IO::HDF::VS;
+	
+   #### no doc for now ####
+
+=head1 DESCRIPTION
+
+This is the description of the PDL::IO::HDF::VS module.
+
+=cut
+EOD
+
+
+pp_addhdr(<<'EOH');
+
+#include <hdf.h>
+#include <string.h>
+#include <stdio.h>
+
+#include <perl.h>
+#include <EXTERN.h>
+#include <XSUB.h>
+
+#define PDLchar pdl
+#define PDLuchar pdl
+#define PDLshort pdl
+#define PDLint pdl
+#define PDLlong pdl
+#define PDLfloat pdl
+#define PDLdouble pdl
+#define PDLvoid pdl
+#define uchar unsigned char
+
+#define PDLlist pdl
+
+EOH
+
+#define AVRef AV
+#pp_bless ("PDL::IO::HDF::VS");
+
+
+#$VERSION = '0.2.beta';
+
+use lib "../";
+use buildfunc;
+
+
+#-------------------------------------------------------------------------
+# Create low level interface from HDF VS and V header file.
+#-------------------------------------------------------------------------
+
+create_low_level (<<'EODEF');
+#
+# HDF (H) Interface
+#
+int Hishdf(const char *filename);
+int Hopen(const char *filename, int access, int n_dds);
+int Hclose(int file_id)+1;
+#
+# VGROUP/VDATA Interface
+#
+int Vstart(int hdfid);
+int Vend(int hdfid);
+int Vgetid(int hdfid, int vgroup_ref);
+int Vattach(int hdfid, int vgroup_ref, const char *access);
+int Vdetach(int vgroup_id);
+int Vntagrefs(int vgroup_id);
+int Vgettagref(int vgroup_id, int index, long int *tag, long int *ref);
+int Vsetname(int vgroup_id, const char *vgroup_name);
+int Vsetclass(int vgroup_id, const char *vgroup_class);
+
+int Vinquire(int vgroup_id, long int *n_entries, char *vgroup_name);
+int Visvg(int vgroup_id, int obj_ref);
+int Visvs(int vgroup_id, int obj_ref);
+int Vaddtagref(int vgroup_id, int tag, int ref);
+int Vinsert(int vgroup_id, int v_id);
+
+int VSsetname(int vdata_id, const char *vdata_name);
+int VSsetclass(int vdata_id, const char *vdata_class);
+int VSgetid(int hdfid, int vdata_ref);
+int VSattach(int hdfid, int vdata_ref, const char *access);
+int VSdetach(int vdata_id);
+int VSelts(int vdata_id);
+int VSsizeof(int vdata_id, const char *fields);
+int VSfind(int hdfid, const char *vdata_name);
+int VFfieldtype(int vdata_id, int field_index);
+int VFnfields(int vdata_ref);
+int VFfieldorder(int vdata_ref, int field_index);
+
+int VSfdefine(int vata_id, const char *fieldname, int data_type, int order)+1;
+int VSsetfields(int vata_id, const char *fieldname_list)+1;
+int VSwrite(int vdata_id, const PDLvoid *databuf, int n_records, int interlace_mode);
+int VSread(int vdata_id, PDLvoid *databuf, int n_records, int interlace_mode);
+int VSlone(int file_id, PDLlong *ref_array, int max_ref);
+
+int VSfnattrs(int vdata_id, int field_index);
+int VSgetattr(int vdata_id, int field_index, int attr_index, PDLlong *values);
+int VSisattr(int vdata_id);
+
+int SDstart(const char *filename, int access_mode);
+int SDreftoindex(int sd_id, int sds_ref);
+int SDselect(int sd_id, int index);
+int SDgetinfo(int sds_id, char *sds_name, int *rank, int *dimsizes, int *number_type, int *nattrs);
+int SDendaccess(int sds_id);
+int SDend(int sd_id);
+
+EODEF
+
+
+#		ptrbuff = databuff;
+#		for(i=0; i<40; i++)
+#		{
+#			printf("buffer %d= %d\n", i, *(int *)ptrbuff);
+#			ptrbuff += 4;
+#		}
+
+pp_addxs('','
+
+int
+_WriteMultPDL(VID, nb_records, nb_fields, interlace_mode, ...);
+		int 		VID
+		int		nb_records
+ 		int 		nb_fields
+		int 		interlace_mode
+	PROTOTYPE: @
+	CODE:
+		unsigned char *databuff, *ptrbuff;
+		unsigned long int total_size;
+		int i, j, k, curvalue, cursdim;
+		SV * sizeofPDL;
+		SV * listofPDL;
+		SV * sdimofPDL;
+		SV * * SvTmp1, * * SvTmp2, * * SvTmp3;
+		pdl *curPDL;
+
+		sizeofPDL = SvRV( ST(4) );
+		sdimofPDL = SvRV( ST(5) );
+		listofPDL = SvRV( ST(6) );
+
+		total_size = 0;
+		for(i=0; i<nb_fields; i++)
+		   {
+			SvTmp1 = av_fetch((AV*)sizeofPDL, i, 0);
+			curvalue = SvIV( *SvTmp1 );
+
+			SvTmp3 = av_fetch((AV*)sdimofPDL, i, 0);
+			cursdim = SvIV( *SvTmp3 );
+
+			total_size += curvalue * cursdim;
+		   }
+
+		total_size *= nb_records;
+		databuff = (unsigned char *)malloc( total_size );
+		if(databuff==NULL){ croak("memory allocation error"); }
+		ptrbuff = databuff;
+
+		if(interlace_mode == 0)
+		{
+		for(i=0; i<nb_records; i++)
+		   {
+			for(j=0; j<nb_fields; j++)
+			   {
+				SvTmp2 = av_fetch((AV*)listofPDL, j, 0);
+				curPDL = PDL->SvPDLV( *SvTmp2 );
+
+				SvTmp3 = av_fetch((AV*)sdimofPDL, j, 0);
+				cursdim = SvIV( *SvTmp3 );
+
+				SvTmp1 = av_fetch((AV*)sizeofPDL, j, 0);
+				curvalue = SvIV( *SvTmp1 );
+
+				for(k=0; k<cursdim; k++)
+				   {
+#					printf("Value %d= %d\n", k, *(int *)(curPDL->data + curvalue*i + curvalue*k*nb_records));
+					memcpy( ptrbuff, (unsigned char *)(curPDL->data + curvalue*i + curvalue*k*nb_records), curvalue );
+
+#					printf("Value %d=%d\n", k, *(int *)(curPDL->data + curvalue*i*cursdim + curvalue*k));
+#					memcpy( ptrbuff, (unsigned char *)(curPDL->data + curvalue*i*cursdim + curvalue*k), curvalue );
+
+#					printf("buffer %d= %d\n", k, *(int *)ptrbuff);
+					ptrbuff += curvalue;
+				   }
+			   }
+		   }
+		}else
+		{ 
+			for(j=0; j<nb_fields; j++)
+			{
+				SvTmp2 = av_fetch((AV*)listofPDL, j, 0);
+				curPDL = PDL->SvPDLV( *SvTmp2 );
+		
+				SvTmp1 = av_fetch((AV*)sizeofPDL, j, 0);
+				curvalue = SvIV( *SvTmp1 );
+
+				SvTmp3 = av_fetch((AV*)sdimofPDL, j, 0);
+				cursdim = SvIV( *SvTmp3 );
+
+				memcpy( ptrbuff, (unsigned char *)(curPDL->data), curvalue*nb_records*cursdim );
+				ptrbuff += curvalue*nb_records*cursdim;
+#				printf("buffer %d= %d\n", k, curvalue*nb_records*cursdim);
+			}
+			interlace_mode = 1;
+		}
+
+		RETVAL = VSwrite(VID, databuff, nb_records, interlace_mode);
+
+	OUTPUT:
+		RETVAL
+
+void
+_Vgetname(vgroup_id, vgroup_name);
+		int vgroup_id
+		char *vgroup_name
+	CODE:
+		vgroup_name=(char *)malloc(VGNAMELENMAX);
+		Vgetname(vgroup_id,vgroup_name);
+	OUTPUT:
+		vgroup_name
+
+void
+_VSgetname(vdata_id, vdata_name);
+		int vdata_id
+		char *vdata_name
+	CODE:
+		vdata_name=(char *)malloc(VGNAMELENMAX*sizeof(char));
+		VSgetname(vdata_id,vdata_name);
+	OUTPUT:
+		vdata_name
+
+void
+_Vgetclass(vgroup_id, vgroup_class);
+		int vgroup_id
+		char *vgroup_class
+	CODE:
+		vgroup_class=(char *)malloc(VGNAMELENMAX*sizeof(char));	
+		Vgetclass(vgroup_id,vgroup_class);
+	OUTPUT:
+		vgroup_class
+
+void
+_VSgetclass(vdata_id, vdata_class);
+		int vdata_id
+		char *vdata_class
+	CODE:
+		vdata_class=(char *)malloc(VGNAMELENMAX*sizeof(char));	
+		VSgetclass(vdata_id,vdata_class);
+	OUTPUT:
+		vdata_class
+
+int
+_VSgetfields(vdata_id, fields);
+		int vdata_id
+		char *fields
+	CODE:
+		char *tmpfields;
+		int len;		
+		tmpfields=(char *)malloc(10000*sizeof(char));
+		RETVAL=VSgetfields(vdata_id, tmpfields);
+		len=strlen(tmpfields);
+		fields=(char *)malloc(len*sizeof(char)+1);
+		strcpy(fields,tmpfields);
+	OUTPUT:
+		RETVAL
+		fields
+	
+int
+_VSinquire(vdata_id, n_records, interlace, fields, vdata_size, vdata_name);
+	int vdata_id
+	long int *n_records
+	long int *interlace
+	char *fields
+	long int *vdata_size
+	char *vdata_name
+CODE:
+	char *tmpfields;
+	int len;	
+	vdata_name=(char *)malloc(VGNAMELENMAX*sizeof(char));
+	tmpfields=(char *)malloc(10000*sizeof(char));
+	RETVAL=VSinquire(vdata_id, n_records, interlace, tmpfields, vdata_size, vdata_name)+1;
+	len=strlen(tmpfields);
+	fields=(char *)malloc(len*sizeof(char)+1);
+	strcpy(fields,tmpfields);
+OUTPUT:
+	RETVAL
+	n_records
+	interlace
+	fields
+	vdata_size	
+	vdata_name
+
+');
+
+ 
+pp_addpm(<<'EOPM');
+
+use PDL::Primitive;
+use PDL::Basic;
+use strict;
+
+use PDL::IO::HDF;
+
+my %TMAP = (  PDL::byte->[0]   => 1, 
+   	      PDL::short->[0]  => 2, 
+	      PDL::ushort->[0]  => 2, 
+   	      PDL::long->[0]   => 4, 
+              PDL::float->[0]  => 4, 
+              PDL::double->[0] => 8 );
+
+#NEW: permet d'ouvrir un fichier HDF pour les Vdatas
+sub new
+  {
+
+    # general
+
+    my $type = shift;
+    my $filename = shift;
+
+    my $self = {};
+    
+    if (substr($filename, 0, 1) eq '+') 
+      { # open for writing
+	$filename = substr ($filename, 1);      # chop off +
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_WRITE + $PDL::IO::HDF::DFACC_READ;
+      }
+    if (substr($filename, 0, 1) eq '-') 
+      { # Creating
+	$filename = substr ($filename, 1);      # chop off -
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_CREATE;
+      }
+    if( !exists $self->{ACCESS_MODE} ) { $self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_READ; } 
+
+    $self->{FILE_NAME} = $filename;
+
+
+   $self->{HID}=PDL::IO::HDF::VS::_Hopen( $self->{FILE_NAME}, $self->{ACCESS_MODE}, 20 );
+   if ($self->{HID}) {
+	   PDL::IO::HDF::VS::_Vstart($self->{HID});
+
+   	   my $SDID = PDL::IO::HDF::VS::_SDstart( $self->{FILE_NAME}, $self->{ACCESS_MODE} );
+
+	#### search for vgroup
+	   my %vgroup;
+
+	   my $vg_ref = -1;
+           while( ($vg_ref = PDL::IO::HDF::VS::_Vgetid($self->{HID}, $vg_ref)) != -1)
+	      {
+		 my $vg_id = PDL::IO::HDF::VS::_Vattach($self->{HID}, $vg_ref, 'r');
+		 
+		 my $n_entries = 0;
+		 my $vg_name = " "x64;
+		 my $res = PDL::IO::HDF::VS::_Vinquire($vg_id, $n_entries, $vg_name);
+
+		 my $vg_class = "";
+		 PDL::IO::HDF::VS::_Vgetclass($vg_id, $vg_class);
+#		 print "name : $vg_name  class : $vg_class   ref : $vg_ref\n";
+
+		 $vgroup{$vg_name}{ref} = $vg_ref;
+		 $vgroup{$vg_name}{class} = $vg_class;
+
+#		 print "Is VGroup : ".(PDL::IO::HDF::VS::_Visvg($vg_id, $vg_ref))."\n";
+#		 print "Is VData : ".(PDL::IO::HDF::VS::_Visvs($vg_id, $vg_ref))."\n";
+
+		 my $n_pairs = PDL::IO::HDF::VS::_Vntagrefs($vg_id);
+#		 print "n pairs : $n_pairs\n";
+
+		 for(0 .. $n_pairs-1)
+		    {
+			my ($tag, $ref);
+			$res = PDL::IO::HDF::VS::_Vgettagref($vg_id, $_, $tag=0, $ref=0);
+#			print "\t$_ // tag : $tag // ref : $ref\n";
+#			print "\t\t\tIs VGroup : ".(PDL::IO::HDF::VS::_Visvg($vg_id, $ref))."\n";
+#			print "\t\t\tIs VData : ".(PDL::IO::HDF::VS::_Visvs($vg_id, $ref))."\n";
+			if($tag == 1965)	#tag for VGroupe
+			   {
+				my $id = PDL::IO::HDF::VS::_Vattach($self->{HID}, $ref, 'r');
+				my $name = " "x64;
+				my $res = PDL::IO::HDF::VS::_Vgetname($id, $name);
+				PDL::IO::HDF::VS::_Vdetach($id);
+				$vgroup{$vg_name}{childs}{$name} = $ref;
+				$vgroup{$name}{parents}{$vg_name} = $vg_ref;
+#				print "\t\t attach VGroupe name : $name \n";
+			   }
+			if($tag == 1962)	#tag for VData
+			   {
+				my $id = PDL::IO::HDF::VS::_VSattach($self->{HID}, $ref, 'r');
+				my $name = " "x64;
+				my $res = PDL::IO::HDF::VS::_VSgetname($id, $name);
+				my $class = "";
+				PDL::IO::HDF::VS::_VSgetclass($id, $class);
+				PDL::IO::HDF::VS::_VSdetach($id);
+				$vgroup{$vg_name}{attach}{$name}{type} = 'VData';
+				$vgroup{$vg_name}{attach}{$name}{ref} = $ref;
+				$vgroup{$vg_name}{attach}{$name}{class} = $class if($class ne '');
+#				print "\t\t attach VData name : $name\n";
+			   }
+			if( ($SDID != -1) && ($tag == 720))		#tag for SDS tag/ref  (see 702)
+			   {
+				my $i = _SDreftoindex($SDID, $ref);
+				my $sds_ID = _SDselect($SDID,$i);
+				my ($name, $rank, $dimsize, $numtype, $nattrs);
+				$res = _SDgetinfo($sds_ID, $name=" "x250, $rank=0, $dimsize=" "x128 , $numtype=0, $nattrs=0);
+
+				$vgroup{$vg_name}{attach}{$name}{type} = 'SDS_Data';
+				$vgroup{$vg_name}{attach}{$name}{ref} = $ref;
+#				print "\t\t attach SDS name : $name\n";
+			   }
+		    }
+
+
+		 PDL::IO::HDF::VS::_Vdetach($vg_id);
+	      }
+	   PDL::IO::HDF::VS::_SDend($SDID);
+	   $self->{VGROUP}=\%vgroup;
+
+	#### search for vdata
+	   my $vdata_ref=-1;
+	   my $vdata_id=-1;
+	   my %vdata;
+
+	   my $MAX_REF = 0;
+#	   my $lone_ref = PDL::long( ones($MAX_REF+10) );
+#	   my $res = PDL::IO::HDF::VS::_VSlone($self->{HID}, $lone_ref, $MAX_REF);
+#	   $lone_ref = $lone_ref->reshape($res);
+#	   print "VSlone res : $res\n $lone_ref\n";
+
+#   $vdata_ref=PDL::IO::HDF::VS::_VSfind($self->{HID},'vdata_name');
+#   if ($vdata_ref != -1 ) {print "ok 2\n";} else {print "not ok 2\n";}
+#   $vdata_ref=PDL::IO::HDF::VS::_VSgetid($self->{HID}, -1);
+#   if ($vdata_ref != -1 ) {print "ok 2\n";} else {print "not ok 2\n";}
+
+
+	   while ( ($vdata_ref=PDL::IO::HDF::VS::_VSgetid($self->{HID}, $vdata_ref)) != -1){
+#	     print "ref: $vdata_ref\n";
+	     my $mode="r";
+	     if ( $self->{ACCESS_MODE} != $PDL::IO::HDF::DFACC_READ ) { $mode="w" }
+	     $vdata_id=PDL::IO::HDF::VS::_VSattach($self->{HID},$vdata_ref,$mode);
+	     my $vdata_size=0;
+	     my $n_records=0;
+	     my $interlace=0;
+	     my $fields="";
+	     my $vdata_name="";
+	     my $status=PDL::IO::HDF::VS::_VSinquire($vdata_id, $n_records, $interlace, $fields, $vdata_size, $vdata_name);
+#	     print $vdata_name . $vdata_id . "\n";
+	     die "PDL::IO::HDF::VS::_VSinquire (vdata_id=" . $vdata_id .")"  if ($status == 0);
+	     $vdata{$vdata_name}{REF} = $vdata_ref;
+	     $vdata{$vdata_name}{NREC}=$n_records;
+	     $vdata{$vdata_name}{INTERLACE}=$interlace;
+
+             $vdata{$vdata_name}{ISATTR} = PDL::IO::HDF::VS::_VSisattr($vdata_id);
+     
+	     my @tfields=split(",",$fields);
+	     my $field_index=0;
+	     my %fields;
+	     foreach my $onefield (@tfields) {
+	       my $field_type=PDL::IO::HDF::VS::_VFfieldtype($vdata_id,$field_index);
+	       $vdata{$vdata_name}{FIELDS}{$onefield}{TYPE}=$field_type;
+	       $vdata{$vdata_name}{FIELDS}{$onefield}{INDEX}=$field_index;	
+	       $field_index++;
+	       #
+	     }
+	     PDL::IO::HDF::VS::_VSdetach($vdata_id);
+	   }
+	
+	   
+	   $self->{VDATA}=\%vdata;
+    }
+
+
+
+
+    bless $self, $type;
+  }
+
+
+sub Vgetchilds
+{
+  my($self, $name)=@_;
+  if(!exists $self->{VGROUP}{$name}{childs}){ return( undef ); }
+  return keys %{$self->{VGROUP}{$name}{childs}};
+}	
+
+sub Vgetattach
+{
+  my($self, $name)=@_;
+  if(!exists $self->{VGROUP}{$name}{attach}){ return( undef ); }
+  return keys %{$self->{VGROUP}{$name}{childs}};
+}	
+
+sub Vgetparents
+{
+  my($self, $name)=@_;
+  if(!exists $self->{VGROUP}{$name}{parents}){ return( undef ); }
+  return keys %{$self->{VGROUP}{$name}{parents}};
+}	
+
+sub Vgetmains
+{
+  my($self)=@_;
+  my @rlist;
+  foreach( keys %{$self->{VGROUP}} )
+    {
+	push(@rlist, $_) if( !exists( $self->{VGROUP}{$_}{parents} ) ) ;
+    }
+  return @rlist;
+}	
+
+sub Vcreate
+{
+  my($self, $name, $class, $where)=@_;
+  
+  my $id = PDL::IO::HDF::VS::_Vattach($self->{HID}, -1, 'w');
+  if($id == -1){ return 0 }
+
+  my $res = _Vsetname($id, $name);
+  $res = _Vsetclass($id, $class) if(defined $class);
+
+  $self->{VGROUP}{$name}{ref} = '???';
+  $self->{VGROUP}{$name}{class} = $class if(defined $class);
+
+  if(defined $where)
+    {
+	if(!exists $self->{VGROUP}{$where}){ return 0 }
+
+	my $ref = $self->{VGROUP}{$where}{ref};
+	
+        my $Pid = PDL::IO::HDF::VS::_Vattach($self->{HID}, $ref, 'w');
+	my $index = PDL::IO::HDF::VS::_Vinsert($Pid, $id);
+        $res = PDL::IO::HDF::VS::_Vgettagref($Pid, $index, my $t=0, my $r=0);
+	PDL::IO::HDF::VS::_Vdetach($Pid);
+
+	$self->{VGROUP}{$name}{parents}{$where} = $ref;
+	$self->{VGROUP}{$where}{childs}{$name} = $r;
+	$self->{VGROUP}{$name}{ref} = $r;
+    }
+  return( _Vdetach($id)+1 );
+}
+
+#sub Vjoinvdata
+#{
+#  my($self, $name, $where)=@_;
+#
+#  
+#}
+
+#CLOSE: ferme un fichier HDF
+sub close {
+  my $self = shift;
+  _Vend($self->{HID});
+  my $Hid = $self->{HID};
+  $self = undef;
+  return( _Hclose($Hid) + 1);
+}
+
+sub VSisattr
+{
+  my($self, $name)=@_;
+  if(!exists $self->{VDATA}{$name}){ return 0; }
+  return $self->{VDATA}{$name}{ISATTR};
+}	
+
+sub VSgetnames {
+  my($self)=@_;
+  my @names=();
+  foreach (keys %{$self->{VDATA}}) {
+    push @names, $_; 
+  }
+  return @names;
+}
+
+sub VSgetfieldsnames {
+  my($self,$name)=@_;
+  my @fields=();
+  die "vdata name " . $name . " doesn't exist" unless exists ${$self->{VDATA}}{$name};
+  foreach (keys %{$self->{VDATA}{$name}{FIELDS}}){
+    push @fields,$_;
+  }
+  return @fields;
+}
+
+sub VSread {
+  my($self, $name, $field)=@_;
+
+  my $data=null;
+
+  my $vdata_ref=PDL::IO::HDF::VS::_VSfind($self->{HID},$name);
+  die "vdata name " . $name . " doesn't exist" unless $vdata_ref;
+  my $vdata_id=PDL::IO::HDF::VS::_VSattach($self->{HID},$vdata_ref,"r");
+  my $vdata_size=0;
+  my $n_records=0;
+  my $interlace=0;
+  my $fields="";
+  my $vdata_name="";
+  my $status=PDL::IO::HDF::VS::_VSinquire($vdata_id, $n_records, $interlace, $fields, $vdata_size, $vdata_name);
+  my $data_type=PDL::IO::HDF::VS::_VFfieldtype($vdata_id,$self->{VDATA}{$name}{FIELDS}{$field}{INDEX});
+#  print $n_records . "++\n";
+  if(not exists $PDL::IO::HDF::SDinvtypeTMAP{$data_type}){
+    die "data_type " . $data_type . "not implemented\n";
+#    foreach (keys %PDL::IO::HDF::SDinvtypeTMAP){ print "_" . $_ ."_\n"; }
+
+  }
+#  my $pro=$PDL::IO::HDF::SDinvtypeTMAP{$data_type};
+#  print $pro . "--\n";
+  my $order=PDL::IO::HDF::VS::_VFfieldorder($vdata_id,$self->{VDATA}{$name}{FIELDS}{$field}{INDEX});
+  if($order == 1) { 
+	 $data=&{$PDL::IO::HDF::SDinvtypeTMAP{$data_type}}(ones($n_records));
+  } else {
+#  	$data=&{$PDL::IO::HDF::SDinvtypeTMAP{$data_type}}(ones($order,$n_records));
+  	$data=&{$PDL::IO::HDF::SDinvtypeTMAP{$data_type}}(ones($n_records, $order));
+  }
+  $status=PDL::IO::HDF::VS::_VSsetfields($vdata_id,$field);
+  die "_VSsetfields" if not $status;
+
+#  print "vsread $field..";
+  $status=PDL::IO::HDF::VS::_VSread($vdata_id,$data,$n_records,$interlace);
+#  print "$data_type $n_records $vdata_size\n";
+#  print "ok\n";
+
+  PDL::IO::HDF::VS::_VSdetach($vdata_id);
+  return $data;
+
+
+}
+
+sub VSwrite
+{
+  my($self, $name, $mode, $field, $value)=@_;
+
+  if( $$value[0]->getndims > 2){ return 0 } #too many dims
+
+  my $VD_id;
+  my $res;
+  my @foo = split(":",$name);
+
+  if(exists $self->{VDATA}{$foo[0]}) { return 0 }
+
+  $VD_id = _VSattach($self->{HID},-1,"w");
+    if($VD_id == -1){return 0}	#!# bug sur le write ?!
+
+  $res = _VSsetname($VD_id,$foo[0]);
+    if($res==-1){ return 0 }
+  $res = _VSsetclass($VD_id,$foo[1]) if( defined $foo[1] );
+    if($res==-1){ return 0 }
+
+  my @listfield = split(",", $field);
+  for(my $i=0; $i<=$#$value; $i++)
+    {
+	  my $HDFtype = $PDL::IO::HDF::SDtypeTMAP{$$value[$i]->get_datatype};
+	  $res = _VSfdefine($VD_id, $listfield[$i], $HDFtype, $$value[$i]->getdim(1));
+	    if($res==0){ return 0 }
+#	  print "fileds : $listfield[$i]\n";
+    }
+
+#  $self->{VDATA}{$foo[0]}{NREC} = $value[$i]->getdim(0);
+#  $self->{VDATA}{$foo[0]}{INTERLACE}=$interlace;
+
+#   print "toto $field\n";
+   $res = _VSsetfields($VD_id, $field);
+   if($res==0){ return 0 }
+    	
+   my @sizeofPDL;
+   my @sdimofPDL;
+   foreach(@$value)
+      {
+	push(@sdimofPDL, $_->getdim(1));
+	push(@sizeofPDL, $TMAP{$_->get_datatype});
+#	print "tmap = ".$TMAP{$_->get_datatype}."\n";
+      }
+
+#   print "dim : @sdimofPDL\n";
+   $res = _WriteMultPDL($VD_id, $$value[0]->getdim(0), $#$value+1, $mode, \@sizeofPDL, \@sdimofPDL, $value) ;
+#   print "res write = $res\n";
+#	  $res = _VSwrite($VD_id, $value, $value->getdim(0), $PDL::IO::HDF::FULL_INTERLACE);
+#	  if($res==-1){ return 0 }
+
+  if(_VSdetach($VD_id)==-1){ return 0 }
+
+  return ( $res );
+}
+
+
+sub DESTROY {
+  my $self = shift;
+  $self->close;
+}
+
+
+EOPM
+
+pp_addpm(<<'EOD');
+
+
+=head2 new
+
+=for ref
+
+	Open or create a new HDF object with VS and V interface.
+
+=for usage
+
+	Arguments:
+	1 : the name of the file.
+		if you want to write to it, prepend the name with
+		the '+' character : "+name.hdf"
+		if you want to create it, prepend the name with
+		the '-' character : "-name.hdf"
+		else the file will be open in read only mode
+	return : the hdf object (die on error)
+
+=for example
+
+	my $hdfobj = PDL::IO::HDF::VS->new("file.hdf");
+
+	
+=head2 close
+
+=for ref
+
+	close the VS interface.
+
+=for usage
+
+	no arguments
+
+=for example
+
+	my $result = $hdfobj->close();
+
+
+
+=head1 AUTHOR
+
+Olivier Archer olivier.archer@ifremer.fr
+contribs of Patrick Leilde patrick.leilde@ifremer.fr
+ 
+=head1 SEE ALSO
+
+perl(1), PDL(1).
+
+=cut
+EOD
+
+
+
+pp_done();
+
+

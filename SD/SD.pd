@@ -1,0 +1,1174 @@
+pp_addpm({At => Top}, <<'EOD');
+
+=head1 NAME 
+
+PDL::IO::HDF::SD - An interface librairie for the SD interface of HDF file.
+
+This librairy provide functions to manipulate
+HDF files with SD interface (reading, writting, ...)
+
+For more infomation on HDF, see http://hdf.ncsa.uiuc.edu/
+
+=head1 SYNOPSIS
+
+  use PDL;
+  use PDL::IO::HDF::SD;
+	
+    ### Creating and writing to a HDF file
+
+    #Create an HDF file
+    my $HDFobj = PDL::IO::HDF::SD->new("-montest.HDF");
+
+    #Define some data
+    my $data = PDL::short( sequence(500,5) );
+
+    #Put data in file as 'myData' dataset
+    #with the names of dimensions ('dim1' and 'dim2')
+    $HDFobj->SDput("myData", $data , ['dim1','dim2']);
+
+    #Put some local attributs in 'myData'
+    #Set the fill value as 0
+    my $res = $HDFobj->SDsetfillvalue("myData", 0);
+    #Set the valid range from 0 to 2000
+    $res = $HDFobj->SDsetrange("myData", [0, 2000]);
+    #Set the default calibration for 'myData' (scale factor = 1, other = 0)
+    $res = $HDFobj->SDsetcal("myData");
+
+    #Set a global text attribut
+    $res = $HDFobj->SDsettextattr('This is a global text test!!', "myGText" );
+    #Set a local text attribut for 'myData'
+    $res = $HDFobj->SDsettextattr('This is a local text testl!!', "myLText", "myData" );
+
+    #Set a global value attribut (you can put all values you want)
+    $res = $HDFobj->SDsetvalueattr( PDL::short( 20 ), "myGValue");
+
+    #Set a local value attribut (you can put all values you want)
+    $res = $HDFobj->SDsetvalueattr( PDL::long( [20, 15, 36] ), "myLValues", "myData" );
+
+    #Close the file
+    $HDFobj->close;
+
+    ### Reading from a HDF file
+
+    #Open an HDF file in read only mode
+    my $HDFobj = PDL::IO::HDF::SD->new("montest.HDF");
+
+    #Get a list of all datasets
+    my @dataset_list = $HDFobj->SDgetvariablename();
+
+    #Get a list of all global attributs name
+    my @globattr_list = $HDFobj->SDgetattributname();
+
+    #Get a list of local attributs name for a dataset
+    my @locattr_list = $HDFobj->SDgetattributname("myData");
+
+    #Get the value of local attribut for a dataset
+    my $value = $HDFobj->SDgetattribut("myLText","myData");
+
+    #Get the all dataset 'myData'
+    my $data = $HDFobj->SDget("myData");
+
+    #Apply the scale factor of 'myData'
+    $data *= $HDFobj->SDgetscalefactor("myData");
+
+    #Get the fill value
+    #The fill value corresponding to the BAD value in pdl
+    $data->inplace->setvaltobad( $HDFobj->SDgetfillvalue("myData") );
+
+    #Get the valid range of datas
+    my @range = $HDFobj->SDgetrange("myData");
+ 
+    #Now you can do what you want with your data
+    $HDFobj->close;
+
+
+=head1 DESCRIPTION
+
+This is the description of the PDL::IO::HDF::SD module.
+
+=cut
+EOD
+
+
+pp_addhdr(<<'EOH');
+
+#include <hdf.h>
+#include <string.h>
+
+
+#define PDLchar pdl
+#define PDLuchar pdl
+#define PDLshort pdl
+#define PDLint pdl
+#define PDLlong pdl
+#define PDLfloat pdl
+#define PDLdouble pdl
+#define PDLvoid pdl
+#define uchar unsigned char
+
+
+#define COMP_CODE_NONE 0
+#define COMP_CODE_RLE 1
+#define COMP_CODE_SKPHUFF 3
+#define COMP_CODE_DEFLATE 4
+
+EOH
+
+#pp_bless ("PDL::IO::HDF");
+
+
+#$VERSION = '0.2.beta';
+
+use lib "../";
+use buildfunc;
+
+#-------------------------------------------------------------------------
+# Create low level interface from HDF SD header file.
+#-------------------------------------------------------------------------
+
+create_low_level (<<'EODEF');
+#
+# SDS Interface
+#
+int SDstart(const char *filename, int access_mode);
+int SDfileinfo(int sd_id, int *ndatasets, int *global_attr);
+int SDattrinfo(int s_id, int attr_index, char *attr_name, int *number_type, int *count);
+#int SDreadattr(int s_id, int attr_index, void *data);
+int SDreadattr(int s_id, int attr_index, PDLvoid *data);
+int SDgetinfo(int sds_id, char *sds_name, int *rank, int *dimsizes, int *number_type, int *nattrs);
+int SDselect(int sd_id, int index);
+int SDgetdimid(int sds_id, int dim_number);
+int SDdiminfo(int dim_id, char *name, int *count, int *number_type, int *nattrs);
+int SDnametoindex(int sd_id, const char *sds_name);
+#int SDreaddata(int sds_id, int *start, int *stride, int *edge, void *buffer);
+int SDreaddata(int sds_id, int *start, int *stride, int *edge, PDLvoid *buffer);
+#int SDsetfillvalue(int sds_id, const void *fill_val);
+int SDsetfillvalue(int sds_id, const PDLvoid *fill_val);
+#int SDsetrange(int sds_id, const void *max, const void *min);
+int SDsetrange(int sds_id, const PDLvoid *max, const PDLvoid *min);
+#int SDwritedata(int sds_id, const int *start, const int *stride, const int *edge, const void *data);
+int SDwritedata(int sds_id, const int *start, const int *stride, const int *edge, const PDLvoid *data);
+int SDsetexternalfile(int sds_id, const char *filename, int offset);
+int SDsetdimstrs(int dim_id, const char *label, const char *unit, const char *format);
+int SDsetdimscale(int dim_id, int count, int number_type, const void *data);
+int SDsetdimname(int dim_id, const char *dim_name);
+int SDsetdatastrs(int sds_id, const char *label, const char *unit, const char *format, const char *coordsys);
+int SDsetcal(int sds_id, double cal, double cal_err, double offset, double offset_err, int number_type);
+#int SDsetcal(int sds_id, float cal, float cal_err, float offset, float offset_err, int number_type);
+int SDsetattr(int s_id, const char *attr_name, int num_type, int count, const void *values);
+int SDreftoindex(int sd_id, int sds_ref);
+int SDiscoordvar(int sds_id);
+int SDidtoref(int sds_id);
+int SDgetdimstrs(int dim_id, char *label, char *unit, char *format, int len);
+int SDgetdimscale(int dim_id, void *data);
+int SDgetdatastrs(int sds_id, char *label, char *unit, char *format, char *coordsys, int len);
+int SDgetcal(int sds_id, double cal, double cal_err, double offset, double offset_err, double number_type);
+#int SDgetcal(int sds_id, float cal, float cal_err, float offset, float offset_err, int number_type);
+int SDendaccess(int sds_id);
+int SDend(int sd_id);
+int SDcreate(int sd_id, const char *name, int number_type, int rank, const int *dimsizes);
+
+EODEF
+
+pp_addxs('','
+
+void
+UnpackSBigEndianPDL(size, buff, p)
+		int		size
+		unsigned char	* buff
+		PDLint		* p
+	CODE:
+		int		i, INTtmp;
+		unsigned char	bch1, bch2;
+		int		* data;
+
+		data = p->data;
+	
+		for(i=0; i<size; i++)
+		{
+			bch1 = buff[i*2];
+			bch2 = buff[i*2+1];
+
+			INTtmp = (bch1 << 8) + bch2;
+
+			if( INTtmp >= 32768 )
+			{ INTtmp -= 65536; }
+
+			data[i] = INTtmp;
+		}
+    	OUTPUT:
+		p
+
+int
+_SDsetcompress(sd_id, ldef);
+		int		sd_id
+		int	 	ldef
+	CODE:
+		comp_info c_info;
+		c_info.deflate.level = ldef;
+		RETVAL = SDsetcompress(sd_id, COMP_CODE_DEFLATE, &c_info) + 1;
+	OUTPUT:
+		RETVAL
+
+int
+_SDgetunlimiteddim(sds_id, dim);
+		int		sds_id
+		int 		dim
+	CODE:
+		char sds_name[250];
+		int rank;
+		int dimsizes[32];
+		int num_type;
+		int nattrs;
+		RETVAL = SDgetinfo(sds_id, sds_name, &rank, dimsizes, &num_type, &nattrs) + 1;
+		if(RETVAL==1){RETVAL = dimsizes[dim];}
+	OUTPUT:
+		RETVAL
+
+int
+_SDsetattr_text(s_id, name, text, size);
+		int		s_id
+		char	 	* name
+		char		* text
+		int 		size
+	CODE:
+		RETVAL = SDsetattr(s_id, name, 4, size, text);
+	OUTPUT:
+		RETVAL
+
+int
+_SDsetattr_values(s_id, name, values, size, type);
+		int		s_id
+		char	 	* name
+		pdl		* values
+		int 		size
+		int 		type
+	CODE:
+		RETVAL = SDsetattr(s_id, name, type, size, values->data);
+	OUTPUT:
+		RETVAL
+
+
+');
+
+ 
+pp_addpm(<<'EOPM');
+
+use PDL::Primitive;
+use PDL::Basic;
+
+use PDL::IO::HDF;
+
+#fonction de convertion d'une chaine de byte en chaine de char
+sub Byte2Char
+  {
+    my ($strB) = @_;
+    my $strC;
+#    print "n_elem : ".$strB->dim."\n";
+    for(my $i=0; $i<$strB->nelem; $i++)
+      {
+#	print "\t$i\n";
+	$strC .= chr( $strB->at($i)) ;
+      }
+    return($strC);
+  }
+
+#NEW: permet d'ouvrir un fichier HDF
+sub new
+  {
+
+    # general
+
+    my $type = shift;
+    my $filename = shift;
+
+    my $self = {};
+    
+    if (substr($filename, 0, 1) eq '+') 
+      { # open for writing
+	$filename = substr ($filename, 1);      # chop off +
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_WRITE + $PDL::IO::HDF::DFACC_READ;
+      }
+    if (substr($filename, 0, 1) eq '-') 
+      { # Creating
+	$filename = substr ($filename, 1);      # chop off -
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_CREATE;
+	    $self->{SDID} = PDL::IO::HDF::SD::_SDstart( $filename, $self->{ACCESS_MODE} );
+	    my $res = PDL::IO::HDF::SD::_SDend($self->{SDID});
+	    die "_ERR::Create\n" if( ($self->{SDID} == -1) || ($res == -1));
+	    $self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_WRITE + $PDL::IO::HDF::DFACC_READ;
+      }
+    if( !exists $self->{ACCESS_MODE} ) { $self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_READ; } 
+
+    $self->{FILE_NAME} = $filename;
+
+    # SD interface
+    
+    $self->{SDID} = PDL::IO::HDF::SD::_SDstart( $self->{FILE_NAME}, $self->{ACCESS_MODE} );
+    die "_ERR::SDstart\n" if( $self->{SDID} == -1 );
+
+    my ($ndatasets, $nglobattr);
+    my $res = _SDfileinfo($self->{SDID}, $ndatasets=-999, $nglobattr=-999);
+    if($res == -1){ die "** sdFileInfo **\n"; }
+    my %globattr;
+
+    for(my $i=0; $i<$nglobattr; $i++)
+      {
+	my ($attrname, $type, $count);
+	$res = _SDattrinfo($self->{SDID}, $i, $attrname=" "x250, $type=0, $count=0);
+	if($res == -1){ die "** sdAttrInfo **\n"; }
+
+##MODIF _SDreadattr()
+#	my $buff = zeroes($count);
+#        $res = &{$SDreadattrTMAP{$type}}($self->{SDID}, $i, $buff, $count);
+#	if($res == -1){ die "** sdReadAttr **\n"; }
+	my $buff = $PDL::IO::HDF::SDinvtypeTMAP{$type}(zeroes($count));
+        $res = _SDreadattr($self->{SDID}, $i, $buff);
+	if($res == -1){ die "** sdReadAttr **\n"; }
+##EOM
+        if( $type == 4 ) { $buff = &Byte2Char($buff); }
+
+	$globattr{$attrname} = $buff;
+
+      }
+    $self->{GLOBATTR} = \%globattr;
+
+    my @dataname;
+    for(my $i=0; $i<$ndatasets; $i++)
+      {
+	my $sds_ID = _SDselect($self->{SDID},$i);
+	if($sds_ID == -1){ die "** sdSelect **\n"; }
+#	print "ok\n";	
+
+	my ($name, $rank, $dimsize, $numtype, $nattrs);
+	$res = _SDgetinfo($sds_ID, $name=" "x250, $rank=0, $dimsize=" "x128 , $numtype=0, $nattrs=0);
+	if($res == -1){ die "** sdGetInfo **\n"; }
+
+	$self->{DATASET}{$name}{type} = $numtype;
+	$self->{DATASET}{$name}{nbdim} = $rank;
+	$self->{DATASET}{$name}{ID} = $sds_ID;
+	
+	for(my $j=0; $j<$rank; $j++)
+	  {
+	    my $dim_ID = _SDgetdimid($sds_ID, $j);
+	    if($dim_ID == -1){ die "** sdGetDimId **\n"; }
+	    
+	    my ($dimname, $dimcount,$nattrdim);
+	    $res = PDL::IO::HDF::SD::_SDdiminfo($dim_ID, $dimname=" "x250, $dimcount=0, $numtype=0, $nattrdim=0);
+	    if($res == -1){ die "** sdDimInfo **\n"; }
+	    $self->{DATASET}{$name}{DIMS}{$dimname}{number} = $j;
+	    $self->{DATASET}{$name}{DIMS}{$dimname}{size} = $dimcount;
+	    if($dimcount==0)
+	      {$self->{DATASET}{$name}{DIMS}{$dimname}{REALsize} = _SDgetunlimiteddim($sds_ID, $j);}
+	    $self->{DATASET}{$name}{DIMS}{$dimname}{id} = $dim_ID;
+	  }
+	for(my $j=0; $j<$nattrs; $j++)
+	  {
+	    my ($attrname, $type, $count);
+	    $res = PDL::IO::HDF::SD::_SDattrinfo($sds_ID, $j, $attrname=" "x100, $type=0, $count=0);
+	    if($res == -1){ die "** sdAttrInfo **\n"; }
+		
+##MODIF
+#	    my $buff = zeroes($count);
+#	    $res = &{$SDreadattrTMAP{$type}}($sds_ID, $j, $buff, $count);
+#	    if($res == -1){ die "** sdReadAttr **\n"; }
+	    my $buff = $PDL::IO::HDF::SDinvtypeTMAP{$type}(zeroes($count));
+#	    print "type : $type / info : ".$buff->info."\n";
+            $res = _SDreadattr($sds_ID, $j, $buff);
+	    if($res == -1){ die "** sdReadAttr **\n"; }
+##EOM
+	    if( $type == 4 ) { $buff = &Byte2Char($buff); }
+		
+	    $self->{DATASET}{$name}{LOCATTR}{$attrname} = $buff;
+	  }
+      }
+
+
+    bless $self, $type;
+  }
+
+
+#SDGETVARIABLENAME: renvoie la liste des datasets
+sub SDgetvariablename
+  {
+    my($self) = @_;
+    return keys %{$self->{DATASET}};
+  }
+
+#SDGETATTRIBUTNAME: renvoie la liste des attr globaux ou une liste d'attr locaux
+sub SDgetattributname
+  {
+    my($self, $name) = @_;
+    if(defined $name){
+        if(!exists $self->{DATASET}{$name}){ return([]) };
+	return keys %{$self->{DATASET}{$name}{LOCATTR}} ;
+    }else { return keys %{$self->{GLOBATTR}}; }
+  }
+
+#SDGETATTRIBUT: return the attribut value
+sub SDgetattribut
+  {
+    my($self, $name, $dataset) = @_;
+    if(defined $dataset){
+        if(!exists $self->{DATASET}{$dataset}){ return(undef) };
+	return $self->{DATASET}{$dataset}{LOCATTR}{$name} ;
+    }else { 
+        if(!exists $self->{GLOBATTR}{$name}){ return(undef) };
+	return $self->{GLOBATTR}{$name}; }
+  }
+
+#SDGETFILLVALUE: renvoie la valeur de remplissage d'un dataset
+sub SDgetfillvalue
+  {
+    my($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return(undef) }
+    return ($self->{DATASET}{$name}{LOCATTR}{_FillValue})->at(0);
+  }
+
+#SDGETRANGE: renvoie le range d'un dataset
+sub SDgetrange
+  {
+    my($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return(undef) }
+    return $self->{DATASET}{$name}{LOCATTR}{valid_range};
+  }
+
+#SDGETSCALEFACTOR: renvoie le facteur d'échelle d'un dataset
+sub SDgetscalefactor
+  {
+    my($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return(undef) }
+    return ($self->{DATASET}{$name}{LOCATTR}{scale_factor})->at(0);
+  }
+
+#SDGETDIMSIZE
+sub SDgetdimsize
+  {
+    my ($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return([]); }
+    my @dim;
+    foreach( keys %{$self->{DATASET}{$name}{DIMS}} )
+      {
+	$dim[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $self->{DATASET}{$name}{DIMS}{$_}{size};
+      }
+    return(@dim);
+  }	
+
+#SDGETDIMSIZEUNLIMIT
+sub SDgetdimsizeunlimit
+  {
+    my ($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return([]); }
+    my @dim;
+    foreach( keys %{$self->{DATASET}{$name}{DIMS}} )
+      {
+	if($self->{DATASET}{$name}{DIMS}{$_}{size}==0){
+		$dim[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $self->{DATASET}{$name}{DIMS}{$_}{REALsize};
+	}else{
+		$dim[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $self->{DATASET}{$name}{DIMS}{$_}{size};
+	}
+      }
+    return(@dim);
+  }	
+
+#SDGETDIMNAME
+sub SDgetdimname
+  {
+    my ($self, $name) = @_;
+    if(!exists $self->{DATASET}{$name}){ return([]); }
+    my @dim;
+    foreach( keys %{$self->{DATASET}{$name}{DIMS}} )
+      {
+	$dim[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $_;
+      }
+    return(@dim);
+  }	
+
+#SDGETCAL: permet de définir les valeurs de calibration d'un dataset
+sub SDgetcal
+  {
+    my ($self, $name ) = @_;
+    my ($cal, $cal_err, $off, $off_err, $type);
+    if(!exists $self->{DATASET}{$name} && !exists $self->{DATASET}{$name}{LOCATTR}{scale_factor}){ return (undef) }
+    $cal = $self->{DATASET}{$name}{LOCATTR}{scale_factor};
+    $cal_err = $self->{DATASET}{$name}{LOCATTR}{scale_factor_err};
+    $off = $self->{DATASET}{$name}{LOCATTR}{add_offset};
+    $off_err = $self->{DATASET}{$name}{LOCATTR}{add_offset_err};
+    $type = $self->{DATASET}{$name}{LOCATTR}{calibrated_nt};
+    return( $cal, $cal_err, $off, $off_err, $type );
+#    return( &PDL::IO::HDF::SD::_SDsetcal($self->{DATASET}{$name}{ID}, $cal, $cal_err, $off, $off_err, $type) + 1);
+  }
+
+#SDGET: récupère des données d'un dataset
+sub SDget
+  {
+    my($self, $name, $start, $end) = @_;
+    
+    my $stride;
+    my $buff;
+    if( exists $self->{DATASET}{$name} )
+      {
+	my $size = 1;
+	if(!defined $end) 
+	  {
+	    ($start, $end) = [];
+	    foreach( keys %{$self->{DATASET}{$name}{DIMS}} )
+	      { 
+		if($self->{DATASET}{$name}{DIMS}{$_}{size}==0){ 
+			$size *= $self->{DATASET}{$name}{DIMS}{$_}{REALsize}; 
+			$$end[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $self->{DATASET}{$name}{DIMS}{$_}{REALsize};
+		}else{ 
+			$size *=  $self->{DATASET}{$name}{DIMS}{$_}{size}; 
+			$$end[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = $self->{DATASET}{$name}{DIMS}{$_}{size};
+		}
+		$$start[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = 0;
+		$$stride[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] = 1;
+	      }
+	  }else
+	    {
+	      foreach( @$end )
+		{ 
+		  $size *= $_;
+		}
+	    }
+	my $st = pack ("L*", @$start);
+	my $en = pack ("L*", @$end);
+	my $ju = pack ("L*", @$stride);
+	
+##MODIF
+#	$buff = zeroes(@$end);
+#	my $res = &{$SDreaddataTMAP{$self->{DATASET}{$name}{type}}}($self->{DATASET}{$name}{ID}, $size, $st, $en, $buff);
+    	$buff = $PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}(zeroes(@$end));
+#	print "toto : ".$self->{DATASET}{$name}{ID}.", @$start, @$end, $size, ".$buff->info."\n";
+	my $res = _SDreaddata($self->{DATASET}{$name}{ID}, $st, $ju, $en, $buff);
+#	print "res : $res ".$buff->info."\n";
+##EOM
+	if($res == -1){ $buff = null; }
+      }else{ $buff = null; }
+    return $buff;
+  }
+
+#SDSETFILLVALUE: définie une valeur de remplissage pour un dataset
+sub SDsetfillvalue
+  {
+    my ($self, $name, $value) = @_;
+    if(!exists $self->{DATASET}{$name}){ return 0 }
+    $value = &{$PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}}($value);
+    $self->{DATASET}{$name}{LOCATTR}{_FillValue} = $value;
+##MODIF
+#    return( &{$SDsetfillvalueTMAP{$PDL::IO::HDF::SDtypeTMAP{$value->get_datatype}}}($self->{DATASET}{$name}{ID}, $value) + 1);
+    return( _SDsetfillvalue($self->{DATASET}{$name}{ID}, $value) + 1);
+##EOM
+  }
+
+#SDSETRANGE: définie un range pour un dataset
+sub SDsetrange
+  {
+    my ($self, $name, $range) = @_;
+    if(!exists $self->{DATASET}{$name}){ return 0 }
+##MODIF
+#int SDsetrange(int sds_id, const void *max, const void *min);
+#    $range = &{$PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}}($range);
+#    $self->{DATASET}{$name}{LOCATTR}{valid_range} = $range;
+#    return( &{$SDsetrangeTMAP{$PDL::IO::HDF::SDtypeTMAP{$range->get_datatype}}}($self->{DATASET}{$name}{ID}, $range) + 1);
+    my $min = &{$PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}}($$range[0]);
+    my $max = &{$PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}}($$range[1]);
+    $range = &{$PDL::IO::HDF::SDinvtypeTMAP{$self->{DATASET}{$name}{type}}}($range);
+    $self->{DATASET}{$name}{LOCATTR}{valid_range} = $range;
+    return( _SDsetrange($self->{DATASET}{$name}{ID}, $max, $min) + 1);
+##EOM
+  }
+
+#SDSETCAL: permet de définir les valeurs de calibration d'un dataset
+sub SDsetcal
+  {
+    my ($self, $name, $cal, $cal_err, $off, $off_err, $type) = @_;
+    if(!exists $self->{DATASET}{$name}){ return 0 }
+    if(!defined($type)){ $type = 6 } # type double par default
+    if(!defined($off_err)){ $off_err = 0 }
+    if(!defined($off)){ $off = 0 }
+    if(!defined($cal_err)){ $cal_err = 0 }
+    if(!defined($cal)){ $cal = 1 } # pas de facteur par default
+    $self->{DATASET}{$name}{LOCATTR}{scale_factor} = $cal;
+    $self->{DATASET}{$name}{LOCATTR}{scale_factor_err} = $cal_err;
+    $self->{DATASET}{$name}{LOCATTR}{add_offset} = $off;
+    $self->{DATASET}{$name}{LOCATTR}{add_offset_err} = $off_err;
+    $self->{DATASET}{$name}{LOCATTR}{calibrated_nt} = $type;
+    return( &PDL::IO::HDF::SD::_SDsetcal($self->{DATASET}{$name}{ID}, $cal, $cal_err, $off, $off_err, $type) + 1);
+  }
+
+#SDSETCOMPRESS: compression d'un dataset
+sub SDsetcompress
+  {    
+    my ($self, $dataset, $deflate) = @_;
+    if(exists $self->{DATASET}{$dataset}) {
+      if(!defined $deflate || $deflate > 9){ $deflate = 5; }
+      return( 1 + PDL::IO::HDF::SD::_SDsetcompress( $self->{DATASET}{$dataset}{ID}, $deflate ) ); }
+    else {
+      return( 0 ); }
+  }
+
+#SDSETTEXTATTR: définie un attr de type texte (local ou global)
+sub SDsettextattr
+  {    
+    my ($self, $text, $name, $dataset) = @_;
+    if(defined $dataset) {
+      if(!exists $self->{DATASET}{$dataset}){return(0);}
+      $self->{DATASET}{$dataset}{LOCALATTR}{$name} = $text;
+      return( PDL::IO::HDF::SD::_SDsetattr_text( $self->{DATASET}{$dataset}{ID}, $name, $text, length($text) ) + 1); }
+    else {
+      $self->{GLOBATTR}{$name} = $text;
+      return( PDL::IO::HDF::SD::_SDsetattr_text( $self->{SDID}, $name, $text, length($text) ) + 1); }
+  }
+
+#SDSETVALUEATTR: définie un attr de type valeur (local ou global)
+sub SDsetvalueattr
+  {    
+    my ($self, $values, $name, $dataset) = @_;
+    if(defined $dataset) {
+      if(!exists $self->{DATASET}{$dataset}){return(0);}
+      $self->{DATASET}{$dataset}{LOCALATTR}{$name} = $values;
+      return( PDL::IO::HDF::SD::_SDsetattr_values( $self->{DATASET}{$dataset}{ID}, $name, $values, $values->nelem, $PDL::IO::HDF::SDtypeTMAP{$values->get_datatype} ) + 1); }
+    else {
+      $self->{GLOBATTR}{$name} = $values;
+      return( PDL::IO::HDF::SD::_SDsetattr_values( $self->{SDID}, $name, $values, $values->nelem, $PDL::IO::HDF::SDtypeTMAP{$values->get_datatype} ) + 1); }
+  }
+
+#SDSETDIMNAME: change the name of a dataset dimensions
+sub SDsetdimname
+  {
+    my ($self, $name, $dimname) = @_;
+    if(!exists $self->{DATASET}{$name}){ return 0; }
+    my $res = 0;
+    foreach( keys %{$self->{DATASET}{$name}{DIMS}} )
+      {
+	if( defined $$dimname[ $self->{DATASET}{$name}{DIMS}{$_}{number} ])
+	  {
+	    $res = PDL::IO::HDF::SD::_SDsetdimname( $self->{DATASET}{$name}{DIMS}{$_}{id}, $$dimname[ $self->{DATASET}{$name}{DIMS}{$_}{number} ] ) + 1;
+	  }else{ return 0; }
+      }
+    return($res);
+  }
+
+#SDPUT: définie un dataset
+sub SDput
+  {
+    my($self, $name, $data, $dimname_p, $from) = @_;
+
+    my $rank = $data->getndims;
+    my $dimsize = pack ("L*", $data->dims);
+
+    if( !exists $self->{DATASET}{$name} ) {
+        my $res = PDL::IO::HDF::SD::_SDcreate($self->{SDID}, $name, $PDL::IO::HDF::SDtypeTMAP{$data->get_datatype}, $rank, $dimsize);
+        if($res == -1){ return 0; }
+    
+        $self->{DATASET}{$name}{ID} = $res;
+        $self->{DATASET}{$name}{type} = $PDL::IO::HDF::SDtypeTMAP{$data->get_datatype};
+        $self->{DATASET}{$name}{nbdim} = $rank;
+    }#else{return (0);}
+
+    my $start = [];
+    my $stride = [];
+    if( !defined $from ) {
+        foreach($data->dims)
+          { push(@$start, 0); push(@$stride, 1); }
+    }else { $start = $from; }
+    $start = pack ("L*", @$start);
+    $stride = pack ("L*", @$stride);
+    $data->make_physical;
+
+##MODIF
+#    $res = &{$SDwritedataTMAP{$PDL::IO::HDF::SDtypeTMAP{$data->get_datatype}}}($self->{DATASET}{$name}{ID}, $start, $dimsize, $data);
+    $res = _SDwritedata($self->{DATASET}{$name}{ID}, $start, $stride, $dimsize, $data);
+##EOM
+    if($res == -1){ return 0; }
+      
+    for(my $j=0; $j<$rank; $j++)
+      {
+	my $dim_ID = _SDgetdimid($self->{DATASET}{$name}{ID}, $j);
+	if($dim_ID == -1){ return(0); }
+	    
+	my ($dimname, $dimcount,$nattrdim);
+	if(defined( @$dimname_p[$j] ))
+	{ (PDL::IO::HDF::SD::_SDsetdimname($dim_ID, @$dimname_p[$j]) == -1) && return(0); }
+	$res = PDL::IO::HDF::SD::_SDdiminfo($dim_ID, $dimname=" "x250, $dimcount=0, $numtype=0, $nattrdim=0);
+	if($res == -1){ return 0; }
+	$self->{DATASET}{$name}{DIMS}{$dimname}{number} = $j;
+	$self->{DATASET}{$name}{DIMS}{$dimname}{size} = $dimcount;
+	$self->{DATASET}{$name}{DIMS}{$dimname}{id} = $dim_ID;
+      }
+    return(1);
+  }
+
+#SDCLOSE: ferme l'interface SD
+sub close {
+  my $self = shift;
+  my $sdid = $self->{SDID};
+  $self = undef;
+  return( PDL::IO::HDF::SD::_SDend($sdid) + 1);
+}
+
+sub DESTROY {
+  my $self = shift;
+  $self->close;
+}
+
+EOPM
+
+pp_addpm(<<'EOD');
+
+
+=head2 new
+
+=for ref
+
+	Open or create a new HDF object.
+
+=for usage
+
+	Arguments:
+	1 : the name of the file.
+		if you want to write to it, prepend the name with
+		the '+' character : "+name.hdf"
+		if you want to create it, prepend the name with
+		the '-' character : "-name.hdf"
+		else the file will be open in read only mode
+	return : the hdf object (die on error)
+
+=for example
+
+	my $hdfobj = PDL::IO::HDF::SD->new("file.hdf");
+	
+
+=head2 SDgetvariablename
+
+=for ref
+
+	get the list of datasets.
+
+=for usage
+
+	No arguments
+	return : the list of dataset or an empty list on error.
+
+=for example
+
+	my @DataList = $hdfobj->SDgetvariablename();
+
+
+=head2 SDgetattributname
+
+=for ref
+
+	get a list of attributs'name, global or corresponding to a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to read attributs name.
+		if the function is call without argument, it return
+		the global attributs'name list
+	return : a list of attributs'name or an empty list on error.
+
+=for example
+
+	# for global attributs :
+	my @attrList = $hdfobj->SDgetattributname();
+
+	# for local attributs :
+	my @attrList = $hdfobj->SDgetattributname("dataset_name");
+
+
+=head2 SDgetattribut
+
+=for ref
+
+	get an attribut value, global or corresponding to a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of the attribut.
+	2 : the name of a dataset you want to get the attribut value.
+		if the function is call without dataset name, it return
+		the global attribut value
+	return : an attribut value or undef if error.
+
+=for example
+
+	# for global attributs :
+	my $attr = $hdfobj->SDgetattribut("attr_name");
+
+	# for local attributs :
+	my $attr = $hdfobj->SDgetattribut("attr_name", "dataset_name");
+
+
+=head2 SDgetfillvalue
+
+=for ref
+
+	get the fill value of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the fill value.
+	return : the fill value or undef if error.
+
+=for example
+
+	my $fillvalue = $hdfobj->SDgetfillvalue("dataset_name");
+
+
+=head2 SDgetrange
+
+=for ref
+
+	get the valid range of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the valid range.
+	return : a list of two elements [min, max] or an empty list if error.
+
+=for example
+
+	my @range = $hdfobj->SDgetrange("dataset_name");
+
+
+=head2 SDgetscalefactor
+
+=for ref
+
+	get the scale factor of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the scale factor.
+	return : the scale factor or undef if error.
+
+=for example
+
+	my $scale = $hdfobj->SDgetscalefactor("dataset_name");
+
+
+=head2 SDgetdimsize
+
+=for ref
+
+	get the dimensions of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the dimensions.
+	return : an array of n dimensions with their sizes or an empty list if error.
+
+=for example
+
+	my @dim = $hdfobj->SDgetdimsize("dataset_name");
+
+
+=head2 SDgetdimsizeunlimit
+
+=for ref
+
+	get the real dimensions of a dataset (real size of unlimited dimensions).
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the dimensions.
+	return : an array of n dimensions with their sizes or an empty list if error.
+
+=for example
+
+	my @dim = $hdfobj->SDgetdimsizeunlimit("dataset_name");
+
+
+=head2 SDgetdimname
+
+=for ref
+
+	get the dimensions name of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to get the dimensions'names .
+	return : an array of n dimensions with their names or an empty list if error.
+
+=for example
+
+	my @dim = $hdfobj->SDgetdimname("dataset_name");
+
+
+=head2 SDgetcal
+
+=for ref
+
+	Get all calibration factor of a dataset
+
+=for usage
+
+	Arguments:
+	1 : the name of the dataset
+	return : (scale factor, scale factor error, offset, offset error, data type)if ok, undef if not ok.
+
+=for example
+
+	#get calibration
+	my ($cal, $cal_err, $off, $off_err, $d_type) = $hdfobj->SDgetcal("dataset_name");
+
+
+=head2 SDget
+
+=for ref
+
+	get a dataset or a slice of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset with you want to get.
+	2 : the start array of the slice.
+	3 : the size array of the slice.
+		the parameters 2 & 3 are optionnals.
+	return : a PDL::double of data if ok, PDL::null if not.
+
+=for example
+
+	# simple use, get all the dataset
+	my $pdldata = $hdfobj->SDget("dataset_name");
+
+	# get a slice of the dataset
+	my @start = [10,50,10]; # the start position of the slice is [10, 50, 10]
+	my @lenght = [20,20,20]; # read 20 values on each dimension from @start
+	my $pdldata = $hdfobj->SDget("dataset_name", @start, @lenght);
+
+	#to get data in an other type than PDL::double
+	my $pdldata = PDL::short( $hdfobj->SDget("dataset_name") );
+
+	#another example: apply scale factor on data
+	my $pdldata = $hdfobj->SDget("dataset_name") * $hdfobj->SDgetscalefactor("dataset_name");
+
+		
+=head2 SDsetfillvalue
+
+=for ref
+
+	set the fill value for a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to set the fill value.
+	2 : the fill value.
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	my $result = $hdfobj->SDsetfillvalue("dataset_name",$fillvalue);
+
+
+=head2 SDsetcompress
+
+=for ref
+
+	Compress a dataset. (only gzip methode)
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to compress.
+	2 : the deflate gzip option. (a value between 1 and 9)
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	my $result = $hdfobj->SDsetfillvalue("dataset_name",$deflate_value);
+
+
+=head2 SDsetrange
+
+=for ref
+
+	set the valid range of a dataset.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to set the range.
+	2 : an array of two elements : @[min, max].
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	my $result = $hdfobj->SDsetrange("dataset_name", [$min, $max]);
+
+
+=head2 SDsetcal
+
+=for ref
+
+	calibrate a dataset.
+	this mean define the scale factor, the scale factor error, the
+	offset and the offset error.
+
+=for usage
+
+	Arguments:
+	1 : the name of a dataset you want to calibrate.
+		other parameters are optionnels
+	2 : the scale factor (default is 1)
+	3 : the scale factor error (default is 0)
+	4 : the offset (default is 0)
+	5 : the offset error (default is 0)
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	#simple exemple: if the dataset have no scale factor or other calibration
+	my $result = $hdfobj->SDsetcal("dataset_name");
+
+	#to just set the scale factor
+	my $result = $hdfobj->SDsetcal("dataset_name", $scalefactor);
+
+	#to set all calibration parameters
+	my $result = $hdfobj->SDsetcal("dataset_name", $scalefactor, $scale_err, $offset, $off_err);
+
+
+=head2 SDsettextattr
+
+=for ref
+
+	add a global or local attribut of type text
+
+=for usage
+
+	Arguments:
+	1 : the text you want to add.
+	2 : the name of the attribut
+	3 : the name of the dataset (optionnel)
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	#set a global text attribut
+	my $result = $hdfobj->SDsettextattr("my_text", "attribut_name");
+
+	#set a local text attribut
+	my $result = $hdfobj->SDsettextattr("my_text", "attribut_name", "dataset_name");
+
+
+=head2 SDsetvalueattr
+
+=for ref
+
+	add a global or local attribut of any type
+
+=for usage
+
+	Arguments:
+	1 : a pdl of value(s) you want to store.
+	2 : the name of the attribut
+	3 : the name of the dataset (optionnel)
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	my $attribut = pdl ( ...... );
+
+	#set a global attribut
+	my $result = $hdfobj->SDsetvalueattr($attribut, "attribut_name");
+
+	#set a local attribut
+	my $result = $hdfobj->SDsetvalueattr($attribut, "attribut_name", "dataset_name");
+
+=head2 SDsetdimname
+
+=for ref
+
+	rename the dimensions of a dataset
+
+=for usage
+
+	Arguments:
+	1 : the name of the dataset
+	2 : an array with the dimensions names
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	#rename all dimensions
+	my $result = $hdfobj->SDsetdimname("dataset_name", ['dim1','dim2','dim3']);
+
+	#rename some dimensions
+	my $result = $hdfobj->SDsetdimname("dataset_name", ['dim1', undef ,'dim3']);
+
+
+=head2 SDput
+
+=for ref
+
+	put a new (or a slice of) dataset
+
+=for usage
+
+	Arguments:
+	1 : the name of the dataset.
+	2 : a pdl of data (data are store white the type of the pdl)
+	3 : the dimansions names (only for creating dataset)
+	4 : the start of the slice to store (only for putting a slice)
+	return : 1 if ok, 0 if not ok.
+
+=for example
+
+	my $data = pdl ( [ [x,x,x],[x,x,x],[x,x,x] ] ); #any value you want
+
+	#simple use: create a new dataset with a $data pdl
+	my $result = $hdfobj->SDput("dataset_name", $data);
+
+	#the same with the name of the dimensions
+	my $result = $hdfobj->SDput("dataset_name", $data, ['dim1','dim2','dim3']);
+
+	#to just put a pdl (a slice) from @start in an existing dataset
+	my @start = [x,y,z];
+	my $result = $hdfobj->SDput("dataset_name", $SliceOfData, undef, @start);
+
+
+=head2 close
+
+=for ref
+
+	close a HDF file.
+
+=for usage
+
+	no arguments
+
+=for example
+
+	my $result = $hdfobj->close();
+
+
+
+=head1 AUTHOR
+
+Patrick Leilde patrick.leilde@ifremer.fr
+contribs of Olivier Archer olivier.archer@ifremer.fr
+
+=head1 SEE ALSO
+
+perl(1), PDL(1).
+
+=cut
+EOD
+
+
+
+pp_done();
+
+

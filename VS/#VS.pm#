@@ -1,0 +1,332 @@
+
+#
+# GENERATED WITH PDL::PP! Don't modify!
+#
+package PDL::IO::HDF::VS;
+
+@EXPORT_OK  = qw( );
+%EXPORT_TAGS = (Func=>[@EXPORT_OK]);
+
+use PDL::Core;
+use PDL::Exporter;
+use DynaLoader;
+
+
+
+   
+   @ISA    = ( 'PDL::Exporter','DynaLoader' );
+   push @PDL::Core::PP, __PACKAGE__;
+   bootstrap PDL::IO::HDF::VS ;
+
+
+
+
+
+=head1 NAME 
+
+PDL::IO::HDF - An interface librairie for HDF file.
+
+This librairy provide functions to manipulate
+HDF files with VS and V interface (reading, writting, ...)
+
+For more infomation on HDF, see http://hdf.ncsa.uiuc.edu/
+
+=head1 SYNOPSIS
+
+  use PDL;
+  use PDL::IO::HDF::VS;
+	
+   #### no doc for now ####
+
+=head1 DESCRIPTION
+
+This is the description of the PDL::IO::HDF::VS module.
+
+=cut
+
+
+
+
+
+
+
+use PDL::Primitive;
+use PDL::Basic;
+use strict;
+
+use PDL::IO::HDF;
+
+#NEW: permet d'ouvrir un fichier HDF pour les Vdatas
+sub new
+  {
+
+    # general
+
+    my $type = shift;
+    my $filename = shift;
+
+    my $self = {};
+    
+    if (substr($filename, 0, 1) eq '+') 
+      { # open for writing
+	$filename = substr ($filename, 1);      # chop off +
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_WRITE + $PDL::IO::HDF::DFACC_READ;
+      }
+    if (substr($filename, 0, 1) eq '-') 
+      { # Creating
+	$filename = substr ($filename, 1);      # chop off -
+	$self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_CREATE;
+      }
+    if( !exists $self->{ACCESS_MODE} ) { $self->{ACCESS_MODE} = $PDL::IO::HDF::DFACC_READ; } 
+
+    $self->{FILE_NAME} = $filename;
+
+
+   $self->{HID}=PDL::IO::HDF::VS::_Hopen( $self->{FILE_NAME}, $self->{ACCESS_MODE}, 20 );
+   if ($self->{HID}) {
+	   PDL::IO::HDF::VS::_Vstart($self->{HID});
+
+	   # search for vdata
+	   my $vdata_ref=-1;
+	   my $vdata_id=-1;
+	   my %vdata;
+
+	   my $MAX_REF = 0;
+	   my $lone_ref = PDL::long( ones($MAX_REF+10) );
+	   my $res = PDL::IO::HDF::VS::_VSlone($self->{HID}, $lone_ref, $MAX_REF);
+#	   $lone_ref = $lone_ref->reshape($res);
+#	   print "VSlone res : $res\n $lone_ref\n";
+
+#   $vdata_ref=PDL::IO::HDF::VS::_VSfind($self->{HID},'vdata_name');
+#   if ($vdata_ref != -1 ) {print "ok7 2\n";} else {print "not ok 2\n";}
+#   $vdata_ref=PDL::IO::HDF::VS::_VSgetid($self->{HID}, -1);
+#   if ($vdata_ref != -1 ) {print "ok 2\n";} else {print "not ok 2\n";}
+
+
+	   while ( ($vdata_ref=PDL::IO::HDF::VS::_VSgetid($self->{HID}, $vdata_ref)) != -1){
+#	     print "ref: $vdata_ref\n";
+	     my $mode="r";
+	     if ( $self->{ACCESS_MODE} != $PDL::IO::HDF::DFACC_READ ) { $mode="w" }
+	     $vdata_id=PDL::IO::HDF::VS::_VSattach($self->{HID},$vdata_ref,$mode);
+	     my $vdata_size=0;
+	     my $n_records=0;
+	     my $interlace=0;
+	     my $fields="";
+	     my $vdata_name="";
+	     my $status=PDL::IO::HDF::VS::_VSinquire($vdata_id, $n_records, $interlace, $fields, $vdata_size, $vdata_name);
+#	     print $vdata_name . $vdata_id . "\n";
+	     die "PDL::IO::HDF::VS::_VSinquire (vdata_id=" . $vdata_id .")"  if ($status == 0);
+	     $vdata{$vdata_name}{REF} = $vdata_ref;
+	     $vdata{$vdata_name}{NREC}=$n_records;
+	     $vdata{$vdata_name}{INTERLACE}=$interlace;
+     
+	     my @tfields=split(",",$fields);
+	     my $field_index=0;
+	     my %fields;
+	     foreach my $onefield (@tfields) {
+	       my $field_type=PDL::IO::HDF::VS::_VFfieldtype($vdata_id,$field_index);
+	       $vdata{$vdata_name}{FIELDS}{$onefield}{TYPE}=$field_type;
+	       $vdata{$vdata_name}{FIELDS}{$onefield}{INDEX}=$field_index;
+	       $field_index++;
+	       #
+	     }
+	     PDL::IO::HDF::VS::_VSdetach($vdata_id);
+	   }
+	
+	   
+	   $self->{VDATA}=\%vdata;
+    }
+
+
+
+
+    bless $self, $type;
+  }
+
+
+#SDCLOSE: ferme un fichier HDF
+sub close {
+  my $self = shift;
+  _Vend($self->{HID});
+  my $Hid = $self->{HID};
+  $self = undef;
+  return( _Hclose($Hid) + 1);
+}
+
+
+sub VSgetnames {
+  my($self)=@_;
+  my @names=();
+  foreach (keys %{$self->{VDATA}}) {
+    push @names, $_; 
+  }
+  return @names;
+}
+
+sub VSgetfieldsnames {
+  my($self,$name)=@_;
+  my @fields=();
+  die "vdata name " . $name . " doesn't exist" unless exists ${$self->{VDATA}}{$name};
+  foreach (keys %{$self->{VDATA}{$name}{FIELDS}}){
+    push @fields,$_;
+  }
+  return @fields;
+}
+
+sub VSread {
+  my($self, $name, $field)=@_;
+
+  my $data=null;
+
+  my $vdata_ref=PDL::IO::HDF::VS::_VSfind($self->{HID},$name);
+  die "vdata name " . $name . " doesn't exist" unless $vdata_ref;
+  my $vdata_id=PDL::IO::HDF::VS::_VSattach($self->{HID},$vdata_ref,"r");
+  my $vdata_size=0;
+  my $n_records=0;
+  my $interlace=0;
+  my $fields="";
+  my $vdata_name="";
+  my $status=PDL::IO::HDF::VS::_VSinquire($vdata_id, $n_records, $interlace, $fields, $vdata_size, $vdata_name);
+  my $data_type=PDL::IO::HDF::VS::_VFfieldtype($vdata_id,$self->{VDATA}{$name}{FIELDS}{$field}{INDEX});
+#  print $n_records . "++\n";
+  if(not exists $PDL::IO::HDF::SDinvtypeTMAP{$data_type}){
+    die "data_type " . $data_type . "not implemented\n";
+#    foreach (keys %PDL::IO::HDF::SDinvtypeTMAP){ print "_" . $_ ."_\n"; }
+
+  }
+#  my $pro=$PDL::IO::HDF::SDinvtypeTMAP{$data_type};
+#  print $pro . "--\n";
+  my $order=PDL::IO::HDF::VS::_VFfieldorder($vdata_id,$self->{VDATA}{$name}{FIELDS}{$field}{INDEX});
+  if($order == 1) { 
+	 $data=&{$PDL::IO::HDF::SDinvtypeTMAP{$data_type}}(ones($n_records));
+  } else {
+  	$data=&{$PDL::IO::HDF::SDinvtypeTMAP{$data_type}}(ones($order,$n_records));
+  }
+  $status=PDL::IO::HDF::VS::_VSsetfields($vdata_id,$field);
+  die "_VSsetfields" if not $status;
+
+#  print "vsread $field..";
+  $status=PDL::IO::HDF::VS::_VSread($vdata_id,$data,$n_records,$interlace);
+#  print "$data_type $n_records $vdata_size\n";
+#  print "ok\n";
+
+  PDL::IO::HDF::VS::_VSdetach($vdata_id);
+  return $data;
+
+
+}
+
+sub VSwrite
+{
+  my($self, $name, $field, $value)=@_;
+
+  if( $value->getndims > 2){ return 0 }
+
+  my $VD_id;
+  my $res;
+  my @foo = split(":",$name);
+
+  if(exists $self->{VDATA}{$foo[0]}) { return 0 }
+
+  $VD_id = _VSattach($self->{HID},-1,"w");
+    if($VD_id == -1){return 0}
+
+  $res = _VSsetname($VD_id,$foo[0]);
+    if($res==-1){ return 0 }
+  $res = _VSsetclass($VD_id,$foo[1]) if( defined $foo[1] );
+    if($res==-1){ return 0 }
+
+  for(my $i=0; $i<$#$value; $i++)
+    {
+	  my $HDFtype = $PDL::IO::HDF::SDtypeTMAP{$value->get_datatype};
+	  $res = _VSfdefine($VD_id, $field, $HDFtype, $$value[$i]->getdim(1));
+	    if($res==0){ return 0 }
+
+#	  $self->{VDATA}{$foo[0]}{NREC} = $$value[$i]->getdim(0);
+#        $self->{VDATA}{$foo[0]}{INTERLACE}=$interlace;
+
+	  $res = _VSsetfields($VD_id, $$field[$i]);
+	  if($res==0){ return 0 }
+  
+	  $res = _VSsetfields($VD_id, $$field[$i]);
+	  if($res==0){ return 0 }
+  
+	  $res = _VSwrite($VD_id, $$value[$i], $$value[$i]->getdim(0), $PDL::IO::HDF::FULL_INTERLACE);
+	  if($res==-1){ return 0 }
+    }
+
+  $res = _VSdetach($VD_id);
+  if($res==-1){ return 0 }
+
+  return ( 1 );
+}
+
+
+sub DESTROY {
+  my $self = shift;
+  $self->close;
+}
+
+
+
+
+
+
+=head2 new
+
+=for ref
+
+	Open or create a new HDF object with VS and V interface.
+
+=for usage
+
+	Arguments:
+	1 : the name of the file.
+		if you want to write to it, prepend the name with
+		the '+' character : "+name.hdf"
+		if you want to create it, prepend the name with
+		the '-' character : "-name.hdf"
+		else the file will be open in read only mode
+	return : the hdf object (die on error)
+
+=for example
+
+	my $hdfobj = PDL::IO::HDF::VS->new("file.hdf");
+
+	
+=head2 close
+
+=for ref
+
+	close the VS interface.
+
+=for usage
+
+	no arguments
+
+=for example
+
+	my $result = $hdfobj->close();
+
+
+
+=head1 AUTHOR
+
+Olivier Archer olivier.archer@ifremer.fr
+contribs of Patrick Leilde patrick.leilde@ifremer.fr
+ 
+=head1 SEE ALSO
+
+perl(1), PDL(1).
+
+=cut
+
+
+;
+
+
+
+# Exit with OK status
+
+1;
+
